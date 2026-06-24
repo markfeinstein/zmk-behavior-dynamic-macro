@@ -1,0 +1,4 @@
+error: Dynamic macro slot 2 is out of range; valid range is 0-1
+error: Dynamic macro slot 2 is out of range; valid range is 0-1
+kp_pressed: usage_page 0x07 keycode 0x04 implicit_mods 0x00 explicit_mods 0x00
+kp_released: usage_page 0x07 keycode 0x04 implicit_mods 0x00 explicit_mods 0x00

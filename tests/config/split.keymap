@@ -1,0 +1,14 @@
+/*
+ * Copyright (c) 2026 The ZMK Behavior Dynamic Macro Contributors
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
+#include <behaviors/zbdm.dtsi>
+#include <dt-bindings/zmk/zbdm.h>
+
+/ {
+    zbdm_ci_reference {
+        zbdm-binding = <&zbdm ZBDM_TOGGLE 0>;
+    };
+};

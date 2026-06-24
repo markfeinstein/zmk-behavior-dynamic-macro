@@ -1,0 +1,8 @@
+# SPDX-License-Identifier: MIT
+
+name: zmk-behavior-dynamic-macro
+build:
+  cmake: .
+  kconfig: Kconfig
+  settings:
+    dts_root: .

@@ -1,0 +1,26 @@
+# SPDX-License-Identifier: MIT
+
+# Build outputs
+build/
+*.bin
+*.elf
+*.hex
+*.map
+*.uf2
+
+# Nix
+result
+result-*
+.direnv/
+
+# Local ZMK/west workspaces
+.west-workspace/
+.west/
+
+# Pi agent artifacts
+.pi-subagents/
+
+# OS/editor noise
+.DS_Store
+*.swp
+*~

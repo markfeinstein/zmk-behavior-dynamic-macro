@@ -1,0 +1,277 @@
+# SPDX-License-Identifier: MIT
+
+name: Publication CI
+
+on:
+  workflow_dispatch:
+  pull_request:
+  push:
+    branches:
+      - main
+    tags:
+      - "v*"
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
+permissions:
+  contents: read
+
+env:
+  ZMK_TESTED_REVISION: 904c9aec8822d79149d42c8a9a77e8828eb08f5a
+
+jobs:
+  nix:
+    name: Nix checks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@a49548c11d9846ad46ecc0115273879b045f001c # v31.10.7
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+
+      - name: Check flake
+        run: nix flake check --no-update-lock-file
+
+  zmk:
+    name: ZMK compatibility (${{ matrix.channel }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    continue-on-error: ${{ matrix.experimental }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - channel: fixed
+            revision: 904c9aec8822d79149d42c8a9a77e8828eb08f5a
+            experimental: false
+          - channel: main-canary
+            revision: main
+            experimental: true
+
+    steps:
+      - name: Checkout module
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          path: zmk-behavior-dynamic-macro
+          persist-credentials: false
+
+      - name: Checkout ZMK
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: zmkfirmware/zmk
+          ref: ${{ matrix.revision }}
+          path: zmk
+          persist-credentials: false
+
+      - name: Report resolved ZMK revision
+        shell: bash
+        run: |
+          set -euo pipefail
+          resolved="$(git -C zmk rev-parse HEAD)"
+          printf 'ZMK channel: %s\nZMK revision: %s\n' \
+            '${{ matrix.channel }}' "$resolved"
+          if [[ '${{ matrix.channel }}' == fixed &&
+                "$resolved" != "$ZMK_TESTED_REVISION" ]]; then
+            echo "::error::Fixed ZMK checkout resolved to an unexpected commit"
+            exit 1
+          fi
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@a49548c11d9846ad46ecc0115273879b045f001c # v31.10.7
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+
+      - name: Fetch ZMK west modules
+        run: |
+          nix develop ./zmk-behavior-dynamic-macro --command bash -euo pipefail -c '
+            cd zmk
+            west init -l app
+            west update
+            mapfile -t west_projects < <(west list -f "{name}" | grep -v "^manifest$")
+            west list -f "{name} {revision} {sha}" "${west_projects[@]}"
+          '
+
+      - name: Run all native_sim tests
+        run: |
+          nix develop ./zmk-behavior-dynamic-macro --command bash -euo pipefail -c '
+            export ZEPHYR_TOOLCHAIN_VARIANT=host
+            ZMK_APP_DIR="$GITHUB_WORKSPACE/zmk/app" bash ./zmk-behavior-dynamic-macro/bin/test.sh
+          '
+
+      - name: Build split central and peripheral
+        if: matrix.channel == 'fixed'
+        run: |
+          module="$GITHUB_WORKSPACE/zmk-behavior-dynamic-macro"
+          cd "$GITHUB_WORKSPACE/zmk"
+          nix develop "$module" --command west build \
+            -s app \
+            -d "$RUNNER_TEMP/split-central" \
+            -b adv360pro_left/nrf52840/zmk \
+            -p -- \
+            -DZMK_EXTRA_MODULES="$module" \
+            -DDTC_OVERLAY_FILE="$module/tests/config/split.keymap" \
+            -DEXTRA_CONF_FILE="$module/tests/config/split-central.conf"
+          nix develop "$module" --command west build \
+            -s app \
+            -d "$RUNNER_TEMP/split-peripheral" \
+            -b adv360pro_right/nrf52840/zmk \
+            -p -- \
+            -DZMK_EXTRA_MODULES="$module" \
+            -DDTC_OVERLAY_FILE="$module/tests/config/split.keymap" \
+            -DEXTRA_CONF_FILE="$module/tests/config/split-peripheral.conf"
+
+      - name: Verify split auto-enable and central-only runtime
+        if: matrix.channel == 'fixed'
+        run: |
+          set -euo pipefail
+          grep -q '^CONFIG_ZMK_ZBDM=y$' "$RUNNER_TEMP/split-central/zephyr/.config"
+          grep -q '^CONFIG_ZMK_ZBDM=y$' "$RUNNER_TEMP/split-peripheral/zephyr/.config"
+          grep -q 'zmk_zbdm_record' "$RUNNER_TEMP/split-central/zephyr/zmk.map"
+          if grep -q 'zmk_zbdm_record' "$RUNNER_TEMP/split-peripheral/zephyr/zmk.map"; then
+            echo "::error::ZBDM runtime linked into split peripheral"
+            exit 1
+          fi
+          grep -q 'behavior_zbdm' "$RUNNER_TEMP/split-central/zephyr/zmk.map"
+          grep -q 'behavior_zbdm' "$RUNNER_TEMP/split-peripheral/zephyr/zmk.map"
+
+  consumer:
+    name: Consumer manifest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      MODULE_URL: ${{ github.event.pull_request.head.repo.clone_url || format('{0}/{1}.git', github.server_url, github.repository) }}
+      MODULE_REVISION: ${{ github.event.pull_request.head.sha || github.sha }}
+
+    steps:
+      - name: Checkout module tooling
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          path: zmk-behavior-dynamic-macro
+          persist-credentials: false
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@a49548c11d9846ad46ecc0115273879b045f001c # v31.10.7
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+
+      - name: Verify remote west manifest consumption
+        shell: bash
+        run: |
+          set -euo pipefail
+          workspace="$RUNNER_TEMP/consumer-workspace"
+          mkdir -p "$workspace/config"
+          cat > "$workspace/config/west.yml" <<EOF
+          manifest:
+            remotes:
+              - name: zmkfirmware
+                url-base: https://github.com/zmkfirmware
+            projects:
+              - name: zmk
+                remote: zmkfirmware
+                revision: ${ZMK_TESTED_REVISION}
+                import: app/west.yml
+              - name: zmk-behavior-dynamic-macro
+                url: ${MODULE_URL}
+                revision: ${MODULE_REVISION}
+                path: modules/zmk/zmk-behavior-dynamic-macro
+            self:
+              path: config
+          EOF
+
+          nix develop ./zmk-behavior-dynamic-macro --command west init \
+            -l "$workspace/config"
+          nix develop ./zmk-behavior-dynamic-macro --command bash -euo pipefail -c \
+            "cd '$workspace' && west update && mapfile -t west_projects < <(west list -f '{name}' | grep -v '^manifest$') && west list -f '{name} {revision} {sha}' \"\${west_projects[@]}\""
+
+          module_dir="$workspace/modules/zmk/zmk-behavior-dynamic-macro"
+          test -f "$module_dir/zephyr/module.yml"
+          actual_url="$(
+            nix develop ./zmk-behavior-dynamic-macro --command bash -euo pipefail -c \
+              "cd '$workspace' && west list zmk-behavior-dynamic-macro -f '{url}'"
+          )"
+          test "$actual_url" = "$MODULE_URL"
+          test "$(git -C "$workspace/zmk" rev-parse HEAD)" = "$ZMK_TESTED_REVISION"
+
+          # Prove the documented west manifest path builds without passing
+          # -DZMK_EXTRA_MODULES or setting ZMK_EXTRA_MODULES. The module should
+          # be discovered by west/Zephyr from the consumer workspace manifest.
+          nix develop ./zmk-behavior-dynamic-macro --command bash -euo pipefail -c \
+            "unset ZMK_EXTRA_MODULES; export ZEPHYR_TOOLCHAIN_VARIANT=host; cd '$workspace'; export ZEPHYR_BASE=\$(west list zephyr -f '{abspath}'); export Zephyr_DIR=\$ZEPHYR_BASE/share/zephyr-package/cmake; cd zmk/app; ./run-test.sh '$module_dir/tests/zmk-behavior-dynamic-macro/basic' || { cat ./build/tests/zmk-behavior-dynamic-macro/basic/build.log || true; exit 1; }"
+
+  release:
+    name: Release
+    if: startsWith(github.ref, 'refs/tags/')
+    needs:
+      - nix
+      - zmk
+      - consumer
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout tagged revision
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Validate release tag
+        shell: bash
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Release tag must be exactly vMAJOR.MINOR.PATCH"
+            exit 1
+          fi
+          if [[ "$(git cat-file -t "refs/tags/$TAG")" != tag ]]; then
+            echo "::error::Release tags must be annotated tags"
+            exit 1
+          fi
+          test "$(git rev-parse "refs/tags/$TAG^{}")" = "$(git rev-parse HEAD)"
+
+      - name: Validate release notes
+        shell: bash
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          notes_file="release-notes/${TAG}.md"
+          if [[ ! -f "$notes_file" ]]; then
+            echo "::error::Missing $notes_file. Copy release-notes/TEMPLATE.md, replace placeholders with release evidence, and commit it before tagging."
+            exit 1
+          fi
+          if grep -nE '<[^>]+>|\[ \]' "$notes_file"; then
+            echo "::error::$notes_file still contains placeholders or unchecked checklist items"
+            exit 1
+          fi
+          if ! grep -q "$ZMK_TESTED_REVISION" "$notes_file"; then
+            echo "::error::$notes_file must mention the required ZMK revision $ZMK_TESTED_REVISION"
+            exit 1
+          fi
+
+      - name: Create GitHub release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          gh release create "$TAG" \
+            --verify-tag \
+            --notes-file "release-notes/${TAG}.md" \
+            --title "$TAG"

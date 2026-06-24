@@ -1,0 +1,2 @@
+s/.*hid_listener_keycode/kp/p
+s/.*\(ZBDM_STOP requires slot parameter 0; use &zbdm ZBDM_STOP 0\).*/zbdm_error: \1/p

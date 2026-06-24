@@ -1,0 +1,1 @@
+s/.*\(zbdm_settings_self_test: pass\).*/\1/p

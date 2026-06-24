@@ -1,0 +1,21 @@
+/*
+ * Copyright (c) 2026 The ZMK Behavior Dynamic Macro Contributors
+ * Copyright (c) 2020 The ZMK Contributors
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
+#include <dt-bindings/zmk/behaviors.h>
+
+/ {
+    behaviors {
+#if ZMK_BEHAVIOR_OMIT(ZBDM)
+        /omit-if-no-ref/
+#endif
+        zbdm: zbdm {
+            compatible = "zmk,behavior-zbdm";
+            #binding-cells = <2>;
+            display-name = "ZBDM Dynamic Macro";
+        };
+    };
+};

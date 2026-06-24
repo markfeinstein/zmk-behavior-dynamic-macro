@@ -1,0 +1,2 @@
+s/.*\(Stopping dynamic macro playback: pressed usage tracking full\).*/warning: \1/p
+s/.*hid_listener_keycode/kp/p

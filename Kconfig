@@ -1,0 +1,117 @@
+# Copyright (c) 2026 The ZMK Behavior Dynamic Macro Contributors
+# SPDX-License-Identifier: MIT
+
+menu "ZMK Dynamic Macro"
+
+config ZMK_ZBDM
+    bool "Dynamic macro behavior"
+    default y if DT_HAS_ZMK_BEHAVIOR_ZBDM_ENABLED
+    default n
+    help
+      Enables a ZMK behavior for recording and replaying runtime HID keyboard
+      keycode sequences. Defaults on when a zmk,behavior-zbdm
+      devicetree node is enabled. On split keyboards the implementation is
+      built only on the central side.
+
+if ZMK_ZBDM
+
+config ZMK_ZBDM_SLOTS
+    int "Dynamic macro slots"
+    default 4
+    range 1 8
+    help
+      Number of independent runtime macro slots. Each slot reserves
+      ZMK_ZBDM_MAX_EVENTS events of static RAM whether or not it is
+      used, so the slot count multiplies the per-slot cost below.
+
+config ZMK_ZBDM_MAX_EVENTS
+    int "Maximum events per dynamic macro slot"
+    default 128
+    range 1 512
+    help
+      Maximum recorded keycode press/release events stored in each slot. A
+      normal key tap uses two events (press and release), and shortcuts may use
+      more. Each event uses 8 bytes of static RAM per slot. When
+      ZMK_ZBDM_CANCEL_RESTORE is enabled, one additional slot-sized
+      recording backup is allocated. Keep this bounded on RAM-constrained MCUs.
+
+config ZMK_ZBDM_MAX_PRESSED_USAGES
+    int "Maximum pressed usages tracked during playback"
+    default 16
+    range 1 512
+    help
+      Maximum simultaneously pressed macro usages tracked so playback
+      cancellation and end-of-playback cleanup can release them. This buffer
+      costs 6 bytes per entry. Raise this for unusual NKRO macros that press
+      many keys before releasing them.
+
+config ZMK_ZBDM_CANCEL_RESTORE
+    bool "Restore previous slot contents on cancel"
+    default y
+    help
+      When ZBDM_CANCEL aborts an in-progress recording, restore the slot to the
+      contents it had before recording started. This keeps one extra slot-sized
+      backup buffer of about MAX_EVENTS x 8 bytes of static RAM. Disable to
+      reclaim that RAM; ZBDM_CANCEL then leaves the canceled slot empty in RAM
+      instead of restoring the previous macro. Any previously persisted macro is
+      left untouched and reloads on the next boot.
+
+config ZMK_ZBDM_PERSIST
+    bool "Persist dynamic macros in settings"
+    default y if SETTINGS
+    depends on SETTINGS
+    help
+      Save macro slots to Zephyr settings/NVS when recording stops or a slot is
+      cleared. Slots are loaded by the normal ZMK settings load during boot.
+
+config ZMK_ZBDM_PLAYBACK_WAIT_MS
+    int "Minimum playback wait in milliseconds"
+    default 10
+    range 0 1000
+    help
+      Fixed delay inserted between consecutive replayed events. Playback
+      replays at this interval rather than reproducing the recorded
+      inter-event timing.
+
+config ZMK_ZBDM_PLAYBACK_BATCH_SIZE
+    int "Zero-delay playback events per work item"
+    default 16
+    range 1 128
+    help
+      Number of events replayed by one work-queue invocation when
+      ZMK_ZBDM_PLAYBACK_WAIT_MS is 0. Higher values reduce scheduling
+      overhead for fastest playback; lower values give cancellation more
+      chances to interrupt very long macros.
+
+config ZMK_ZBDM_RECORD_MODIFIERS
+    bool "Record explicit modifier key events"
+    default y
+    help
+      Record left/right Ctrl, Shift, Alt, and GUI key presses emitted by &kp.
+      Keep this enabled to record physical modifier shortcuts like Ctrl+C.
+
+config ZMK_ZBDM_DEBUG
+    bool "Verbose dynamic macro logging"
+    default n
+    help
+      Emit additional debug log messages through ZMK's log module.
+
+config ZMK_ZBDM_TEST_RAISE_ERROR_AFTER_DELIVERY
+    bool "Inject generated-event errors for tests"
+    default n
+    help
+      Test-only fault injection that changes successful generated-event raises
+      to -EIO after listeners have already processed the event. Do not enable in
+      firmware builds.
+
+config ZMK_ZBDM_TEST_SETTINGS
+    bool "Run internal settings self-tests"
+    depends on ZMK_ZBDM_PERSIST
+    default n
+    help
+      Build the internal persistence parser and failed-save self-test. Do not
+      enable in firmware builds.
+
+endif # ZMK_ZBDM
+
+endmenu

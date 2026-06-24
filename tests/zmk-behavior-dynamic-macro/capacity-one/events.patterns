@@ -1,0 +1,2 @@
+s/.*\(Dynamic macro slot [0-9][0-9]* full; stopping recording\).*/warning: \1/p
+s/.*hid_listener_keycode/kp/p

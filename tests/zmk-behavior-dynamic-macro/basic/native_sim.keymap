@@ -1,0 +1,23 @@
+/*
+ * Copyright (c) 2026 The ZMK Behavior Dynamic Macro Contributors
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
+#include <dt-bindings/zmk/keys.h>
+#include <behaviors.dtsi>
+#include <dt-bindings/zmk/kscan_mock.h>
+#include "../behavior_keymap.dtsi"
+
+&kscan {
+    rows = <1>;
+    columns = <6>;
+    events = <
+        ZMK_MOCK_PRESS(0,0,10) ZMK_MOCK_RELEASE(0,0,20)
+        ZMK_MOCK_PRESS(0,3,30) ZMK_MOCK_RELEASE(0,3,40)
+        ZMK_MOCK_PRESS(0,4,50) ZMK_MOCK_RELEASE(0,4,60)
+        ZMK_MOCK_PRESS(0,5,70) ZMK_MOCK_RELEASE(0,5,80)
+        ZMK_MOCK_PRESS(0,2,90) ZMK_MOCK_RELEASE(0,2,100)
+        ZMK_MOCK_PRESS(0,1,110) ZMK_MOCK_RELEASE(0,1,120)
+    >;
+};
